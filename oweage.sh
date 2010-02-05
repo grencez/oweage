@@ -1,84 +1,91 @@
 #!/bin/bash
 
+exec 3<&1
+exec 1<&-
+exec 1> /dev/null
+
 function show_help
 {
-cat <<EOF
+    cat 1>&2 << "EOF"
 Useage:
-    oweage [DATABASE] -a LENDER DOLLARS[.CENTS] DEBTOR1 [DEBTOR2 ... DEBTORN]
-    oweage [DATABASE] -b NAME
-    oweage [DATABASE] -s LENDER [DEBTOR1 ... DEBTORN]
-    oweage [DATABASE] -r REGEX
+    oweage [OPTIONS] [ACTION]
 
+OPTIONS
+  -v  N
+     Set verbosity level to N, normal crap is level 1.
+  -d  database
+     Specify the database to use. Default is $HOME/.oweage_db
 
-If DATABASE is not specified, $HOME/.oweage_db will be used.
-
-  -a  add new oweage
-  -b  balance wrt the name given. Positive numbers indicate s/he is owed money
-  -s  search oweages, all terms must match
-  -r  match a oweage reason with a regular expression
+ACTION
+  -a  lender dollars[.cents] debtor1 ... debtorN
+     Add new oweage.
+  -b  name
+     Show a person's overall balance. Positive means s/he is owed money.
+  -s  lender [debtor1 ... debtorN]
+     Search oweages, all terms must match.
+  -r  regex
+     Search oweages by matching a regular expression to the reason field.
 EOF
+    return 1
 }
 
-args=($@)
-i=0
 tmp1=`tempfile`
 tmp2=`tempfile`
+verbose_level=1
+db="${HOME}/.oweage_db"
 
-if [[ "${args[$i]}" =~ ^- ]]
-then
-    #echo match
-    db="${HOME}/.oweage_db"
-else
-    #echo no match
-    db=$1
-    let ++i
-fi
-
-# Make sure database exists.
-if [ ! -f $db ]
-then
-    touch $db
-fi
-
-## used by follewing functions
-amt=0
-
-function unformat_amt
+trace ()
 {
-    amt=${amt//\$/}
-
-    if [[ $amt =~ \..$ ]]
+    if [ "$1" -le "$verbose_level" ]
     then
-        amt=${amt//\./}0
-    elif [[ $amt =~ \...$ ]]
-    then
-        amt=${amt//\./}
-    elif [[ $amt =~ \. ]]
-    then
-        echo "AMOUNT ($amt) DOESN'T MAKE CENTS"
-        exit 1
-    else
-        amt="${amt}00"
+        shift
+        echo "$@" 1>&3
     fi
 }
 
-function format_amt
+unformat_amt ()
 {
-    cut_index=${#amt}
-    if [ $cut_index -eq 1 ]
+    local amt x y
+    trace 4 "unformat_amt ($1)"
+
+    amt=(`echo "$1" | sed -e 's/^\$\?\([0-9]*\)\.\?\([0-9]*\)$/\1 \2/'`)
+    x=${amt[0]}
+    y=${amt[1]}
+
+    trace 4 "$x $y"
+
+    # Sanity checking
+    if [ "${#y}" -gt 2 ]
     then
-        amt="\$0.0${amt}"
-    elif [ $cut_index -eq 2 ]
-    then
-        amt="\$0.${amt}"
-    else
-        cut_index=$(($cut_index - 2))
-        amt="\$${amt:0:$cut_index}.${amt:$cut_index}"
+        trace 1 "You specified too many pennies!" 3>&2
+        return 1
     fi
+
+    # Zero-fill y
+    while [ "${#y}" -lt 2 ]
+    do
+        y="${y}0"
+    done
+
+    echo "$x$y"
 }
 
-function read_oweage
+format_amt ()
 {
+    local x y
+    x=$(($1 / 100))
+    if [ $1 -ge 0 ] ; then
+        y=$(($1 % 100))
+    else
+        y=$((- $1 % 100))
+    fi
+
+    printf '$%d.%02d\n' $x $y
+}
+
+read_oweage ()
+{
+    local token
     if ! read -a token
     then
         return 1
@@ -87,44 +94,39 @@ function read_oweage
     amt=${token[1]}
     debtors=(${token[@]:2})
     read
-    reason=$REPLY
+    reason="$REPLY"
 }
 
-function show_oweage
+show_oweage ()
 {
-    format_amt
-    echo $lender $amt ${debtors[@]}
-    echo "Reason:" $reason
+    trace 1 "$lender `format_amt $amt` ${debtors[@]}"
+    trace 1 "Reason: $reason"
 }
 
-function match_lender
+match_lender ()
 {
-    if [ $lender = $name ]
-    then
-        return 0
-    else
-        return 1
-    fi
+    test "$lender" = "$name"
 }
 
-function match_debtor
+match_cdr ()
 {
-    for str in ${debtors[@]}
+    local str
+    for str in ${@:2}
     do
-        if [ $str = $name ]
-        then
-            return 0
-        fi
+        expr match "$str" "$1" && return 0
     done
     return 1
 }
 
-function update_balances
+update_balances ()
 {
+    local found x y name amt
+    name=$1
+    amt=$2
     found=0
     while read x y
     do
-        if [ $x = $name ]
+        if [ "$x" = "$name" ]
         then
             y=$(($y + $amt))
             found=1
@@ -134,23 +136,23 @@ function update_balances
 
     if [ 0 -eq $found ]
     then
-        echo $name $amt >>$tmp2
+        echo $name $amt >>"$tmp2"
     fi
-    mv $tmp2 $tmp1
+    mv "$tmp2" "$tmp1"
 }
 
-function print_balances
+print_balances ()
 {
+    local x y
     while read x y
     do
-        amt=$y
-        format_amt
-        echo $x $amt
+        echo $x `format_amt "$y"`
     done
 }
 
-function match_array
+match_array ()
 {
+    local x y matchp
     # sarr - array searching
     # marr - array to match
     for x in ${marr[@]}
@@ -158,132 +160,162 @@ function match_array
         matchp=0
         for y in ${sarr[@]}
         do
-            if [ $x = $y ]
+            if expr "$x" : "$y"
             then
                 matchp=1
             fi
         done
-        if [ $matchp == 0 ]
-        then
-            return 1
-        fi
+
+        test $matchp -eq 0 && return 1
     done
     return 0
 }
 
-flag=${args[$i]}
-let ++i
+add_oweage ()
+{
+    local db lender amt debtors reason
+    db="$1"
+    lender="$2"
+    amt=`unformat_amt $3` || return 1
+    debtors=(${@:4})
 
-case "$flag" in
-    '-a')
-    lender=${args[$i]}
-    let ++i
-    amt=${args[$i]}
-    unformat_amt
-    let ++i
-    debtors=${args[@]:$i}
+    trace 4 "db: $db"
+    trace 4 "lender: $lender"
+    trace 4 "amt: $amt"
+    trace 4 "debtors: $debtors"
 
-    echo -n "Reason? "
+    trace 1 "Reason?"
     read reason
 
-    echo $lender $amt ${debtors[@]} >> $db
-    echo $reason >> $db
+    echo "$lender $amt ${debtors[@]}" >> "$db"
+    echo "$reason" >> "$db"
+}
 
-    #echo "DEBUG:"
-    #echo "lender:" $lender
-    #echo "amt:" $amt
-    #format_amt
-    #echo "formatted:" $amt
-    #echo "debtors:" $debtors
-    #echo "Reason:" $reason
-    ;;
-
-    '-b')
+show_balance ()
+{
+    local names balance amt
     balance=0
     # Name being searched for.
-    cool_guy=${args[$i]}
-    let ++i
     while read_oweage
     do
-        name=$cool_guy
-        names=
-        if match_lender
+        if expr match "$1" "$lender"
         then
             names=${debtors[@]}
-            balance=$(($balance + $amt))
+            balance=$(($balance + $amt - ($amt % ${#debtors[@]})))
             amt=$(($amt / ${#debtors[@]}))
-            #echo "lender $amt $balance"
-        elif match_debtor
+        elif match_cdr "$1" ${debtors[@]}
         then
             names=$lender
-            #echo -n "debtor $amt"
             amt=$((- $amt / ${#debtors[@]}))
             balance=$(($balance + $amt))
-            #echo " $balance"
+        else
+            names=""
         fi
-        
+
         for name in $names
         do
-            update_balances
+            update_balances $name $amt
         done
-    done < $db
+    done < "$db"
 
     # Make sure the guy whose balance
     # we're getting only appears once.
     while read dude amt
     do
-        if [ $dude = $cool_guy ]
+        if [ "$dude" = "$1" ]
         then
             balance=$(($balance - $amt))
         else
-            echo $dude $amt >> $tmp2
+            echo $dude $amt >> "$tmp2"
         fi
-    done <$tmp1
-    mv $tmp2 $tmp1
-    amt=$balance
-    format_amt
-    echo "Balance for" $cool_guy "is" $amt
-    print_balances <$tmp1
-    ;;
+    done <"$tmp1"
+    mv "$tmp2" "$tmp1"
+    amt=`format_amt "$balance"`
+    trace 1 "Balance for $1 is $amt"
+    print_balances <"$tmp1"
+}
 
-    '-s')
-    name=${args[$i]}
-    let ++i
-    marr=${args[@]:$i}
+search_oweages ()
+{
+    local name marr sarr matchp lender amt debtors reason
+    name="$1"
+    marr=${@:2}
     while read_oweage
     do
         matchp=0
-        if [ $lender = $name ]
+        if expr "$lender" : "$name"
         then
             sarr=${debtors[@]}
-            if match_array
+            match_array
+            matchp=$?
+        fi
+
+        if [ $matchp -eq 1 ]
+        then
+            show_oweage
+        fi
+    done <$db
+}
+
+while [ $# -gt 0 ]
+do
+    flag=$1
+    shift
+    case "$flag" in
+        '-v')
+        verbose_level="$1"
+        shift
+        ;;
+
+        '-d')
+        db="$1"
+        shift
+        trace 2 "Using $db as database."
+
+        # Make sure database exists.
+        if [ ! -e "$db" ]
+        then
+            trace 2 "Creating database."
+            touch "$db"
+        fi
+        ;;
+
+        '-a')
+        add_oweage "$db" ${*}
+        shift $#
+        ;;
+
+        '-b')
+        show_balance "$*"
+        shift $#
+        ;;
+
+        '-s')
+        search_oweages $*
+        shift $#
+        ;;
+
+        '-r')
+        regex="$1"
+        shift $#
+        while read_oweage
+        do
+            if expr "$reason" : "$regex"
             then
-                matchp=1
+                show_oweage
             fi
-        fi
+        done <"$db"
+        ;;
 
-        if [ $matchp == 1 ]
-        then
-            show_oweage
-        fi
-    done <$db
-    ;;
+        *)
+        show_help
+        false
+        ;;
+    esac
 
-    '-r')
-    regex=${args[$i]}
-    while read_oweage
-    do
-        if [[ $reason =~ $regex ]]
-        then
-            show_oweage
-        fi
-    done <$db
-    ;;
+    # Break if there was a problem
+    test 0 -ne "$?" && break
+done
 
-    *)
-    show_help
-    ;;
-esac
-
-rm -f $tmp1 $tmp2
+rm -f "$tmp1" "$tmp2"
 
