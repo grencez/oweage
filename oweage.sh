@@ -118,38 +118,6 @@ match_cdr ()
     return 1
 }
 
-update_balances ()
-{
-    local found x y name amt
-    name=$1
-    amt=$2
-    found=0
-    while read x y
-    do
-        if [ "$x" = "$name" ]
-        then
-            y=$(($y + $amt))
-            found=1
-        fi
-        echo $x $y >>$tmp2
-    done <$tmp1
-
-    if [ 0 -eq $found ]
-    then
-        echo $name $amt >>"$tmp2"
-    fi
-    mv "$tmp2" "$tmp1"
-}
-
-print_balances ()
-{
-    local x y
-    while read x y
-    do
-        echo $x `format_amt "$y"`
-    done
-}
-
 match_array ()
 {
     local x y matchp
@@ -193,46 +161,78 @@ add_oweage ()
 
 show_balance ()
 {
-    local names balance amt
-    balance=0
-    # Name being searched for.
-    while read_oweage
-    do
-        if expr match "$1" "$lender"
-        then
-            names=${debtors[@]}
-            balance=$(($balance + $amt - ($amt % ${#debtors[@]})))
-            amt=$(($amt / ${#debtors[@]}))
-        elif match_cdr "$1" ${debtors[@]}
-        then
-            names=$lender
-            amt=$((- $amt / ${#debtors[@]}))
-            balance=$(($balance + $amt))
-        else
-            names=""
-        fi
+    local indiv_increm reducer
 
-        for name in $names
+    indiv_increm ()
+    {
+        local lender debtors amt amt_each reason name
+        while read_oweage
         do
-            update_balances $name $amt
+            amt=$(($amt - ($amt % ${#debtors[@]})))
+            amt_each=$((- $amt / ${#debtors[@]}))
+            if expr match "$1" "$lender"
+            then
+                echo "$1" $amt
+                for name in "${debtors[@]}"
+                do
+                    echo "$name" $amt_each
+                done
+            elif match_cdr "$1" ${debtors[@]}
+            then
+                echo "$lender" $amt
+                echo "$1" $amt_each
+            fi
         done
-    done < "$db"
+    }
 
-    # Make sure the guy whose balance
-    # we're getting only appears once.
-    while read dude amt
-    do
-        if [ "$dude" = "$1" ]
-        then
-            balance=$(($balance - $amt))
-        else
-            echo $dude $amt >> "$tmp2"
-        fi
-    done <"$tmp1"
-    mv "$tmp2" "$tmp1"
-    amt=`format_amt "$balance"`
-    trace 1 "Balance for $1 is $amt"
-    print_balances <"$tmp1"
+    reducer ()
+    {
+        local cur_name total name amt
+        read cur_name total || return 1
+        while read name amt
+        do
+            if [ "$name" = "$cur_name" ]
+            then
+                total=$(($total + $amt))
+            else
+                echo "$cur_name" $total
+                cur_name="$name"
+                total="$amt"
+            fi
+        done 
+        echo "$cur_name" $total
+    }
+
+    orderer ()
+    {
+        local name amt
+
+        while read name amt
+        do
+            if [ "$name" = "$1" ]
+            then
+                echo "$name"  "$amt" >&3
+            else
+                trace 1 "amt is $amt" >&2
+                echo 1 "$name" "$((0 - $amt))"
+            fi
+        done | sort >&3
+            
+        # yes hi | { tee /dev/fd/3 | sed -e 's/hi/blar/' ; } 3>&1 | sed -e 's/hi/bye/'
+    } 3>&1
+
+    formatter ()
+    {
+        local name amt
+        read name amt || return 1
+        trace 1 "Balance for $name is $(format_amt $amt)"
+        while read name amt
+        do
+            trace 1 "$name $(format_amt $amt)"
+        done
+    }
+
+    < "$db" indiv_increm "$1" | sort | reducer | orderer "$1" | formatter
 }
 
 search_oweages ()
@@ -256,6 +256,12 @@ search_oweages ()
         fi
     done <$db
 }
+
+if [ $# -eq 0 ]
+then
+    show_help
+    exit 1
+fi
 
 while [ $# -gt 0 ]
 do
