@@ -29,23 +29,29 @@ EOF
     return 1
 }
 
-tmp1=`tempfile`
-tmp2=`tempfile`
 verbose_level=1
 db="${HOME}/.oweage_db"
 
 trace ()
 {
-    local lvl
-    lvl="$1"
-    shift
-    if [ "$lvl" -le "$verbose_level" ]
+    local lvl plusp
+    if [ $1 -gt 0 ]
     then
-        if [ "$lvl" -eq 1 ]
+        plusp=1
+        lvl=$1
+    else
+        plusp=0
+        lvl=$((- $1))
+    fi
+    shift
+
+    if [ $lvl -le $verbose_level ]
+    then
+        if [ $plusp -eq 1 ]
         then
             echo "$*"
         else
-            echo "$*" 1>&2
+            echo "$*" >&2
         fi
     fi
 }
@@ -53,18 +59,18 @@ trace ()
 unformat_amt ()
 {
     local amt x y
-    trace 4 "unformat_amt ($1)"
+    trace -4 "unformat_amt ($1)"
 
     amt=(`echo "$1" | sed -e 's/^\$\?\([0-9]*\)\.\?\([0-9]*\)$/\1 \2/'`)
     x=${amt[0]}
     y=${amt[1]}
 
-    trace 4 "$x $y"
+    trace -4 "$x $y"
 
     # Sanity checking
     if [ "${#y}" -gt 2 ]
     then
-        trace 1 "You specified too many pennies!" >&2
+        trace -1 "You specified too many pennies!"
         return 1
     fi
 
@@ -154,10 +160,10 @@ add_oweage ()
     amt=`unformat_amt $3` || return 1
     debtors=("${@:4}")
 
-    trace 4 "db: $db"
-    trace 4 "lender: $lender"
-    trace 4 "amt: $amt"
-    trace 4 "debtors: $debtors"
+    trace -4 "db: $db"
+    trace -4 "lender: $lender"
+    trace -4 "amt: $amt"
+    trace -4 "debtors: $debtors"
 
     trace 1 "Reason?"
     read reason
@@ -328,6 +334,4 @@ do
     # Break if there was a problem
     test 0 -ne "$?" && break
 done
-
-rm -f "$tmp1" "$tmp2"
 
