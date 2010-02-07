@@ -1,8 +1,8 @@
 #!/bin/bash
 
-exec 3<&1
-exec 1<&-
-exec 1> /dev/null
+#exec 3<&1
+#exec 1<&-
+#exec 1> /dev/null
 
 function show_help
 {
@@ -36,10 +36,17 @@ db="${HOME}/.oweage_db"
 
 trace ()
 {
-    if [ "$1" -le "$verbose_level" ]
+    local lvl
+    lvl="$1"
+    shift
+    if [ "$lvl" -le "$verbose_level" ]
     then
-        shift
-        echo "$@" 1>&3
+        if [ "$lvl" -eq 1 ]
+        then
+            echo "$*"
+        else
+            echo "$*" 1>&2
+        fi
     fi
 }
 
@@ -57,7 +64,7 @@ unformat_amt ()
     # Sanity checking
     if [ "${#y}" -gt 2 ]
     then
-        trace 1 "You specified too many pennies!" 3>&2
+        trace 1 "You specified too many pennies!" >&2
         return 1
     fi
 
@@ -111,9 +118,9 @@ match_lender ()
 match_cdr ()
 {
     local str
-    for str in ${@:2}
+    for str in "${@:2}"
     do
-        expr match "$str" "$1" && return 0
+        test "$str" = "$1" && return 0
     done
     return 1
 }
@@ -128,7 +135,7 @@ match_array ()
         matchp=0
         for y in ${sarr[@]}
         do
-            if expr "$x" : "$y"
+            if [ "$x" = "$y" ]
             then
                 matchp=1
             fi
@@ -145,7 +152,7 @@ add_oweage ()
     db="$1"
     lender="$2"
     amt=`unformat_amt $3` || return 1
-    debtors=(${@:4})
+    debtors=("${@:4}")
 
     trace 4 "db: $db"
     trace 4 "lender: $lender"
@@ -170,17 +177,17 @@ show_balance ()
         do
             amt=$(($amt - ($amt % ${#debtors[@]})))
             amt_each=$((- $amt / ${#debtors[@]}))
-            if expr match "$1" "$lender"
+            if [ "$1" = "$lender" ]
             then
-                echo "$1" $amt
+                echo "$1 $amt"
                 for name in "${debtors[@]}"
                 do
-                    echo "$name" $amt_each
+                    echo "$name $amt_each"
                 done
-            elif match_cdr "$1" ${debtors[@]}
+            elif match_cdr "$1" "${debtors[@]}"
             then
-                echo "$lender" $amt
-                echo "$1" $amt_each
+                echo "$lender $((- $amt_each))"
+                echo "$1 $amt_each"
             fi
         done
     }
@@ -195,12 +202,12 @@ show_balance ()
             then
                 total=$(($total + $amt))
             else
-                echo "$cur_name" $total
+                echo "$cur_name $total"
                 cur_name="$name"
                 total="$amt"
             fi
         done 
-        echo "$cur_name" $total
+        echo "$cur_name $total"
     }
 
     orderer ()
@@ -213,8 +220,7 @@ show_balance ()
             then
                 echo "$name"  "$amt" >&3
             else
-                trace 1 "amt is $amt" >&2
-                echo 1 "$name" "$((0 - $amt))"
+                echo "$name" "$((- $amt))"
             fi
         done | sort >&3
             
@@ -243,7 +249,7 @@ search_oweages ()
     while read_oweage
     do
         matchp=0
-        if expr "$lender" : "$name"
+        if [ "$lender" = "$name" ]
         then
             sarr=${debtors[@]}
             match_array
@@ -287,17 +293,17 @@ do
         ;;
 
         '-a')
-        add_oweage "$db" ${*}
+        add_oweage "$db" "$@"
         shift $#
         ;;
 
         '-b')
-        show_balance "$*"
+        show_balance "$@"
         shift $#
         ;;
 
         '-s')
-        search_oweages $*
+        search_oweages "$@"
         shift $#
         ;;
 
@@ -306,7 +312,7 @@ do
         shift $#
         while read_oweage
         do
-            if expr "$reason" : "$regex"
+            if expr "$reason" : "$regex" >/dev/null
             then
                 show_oweage
             fi
