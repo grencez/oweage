@@ -1,10 +1,10 @@
-#!/bin/bash
+#!/bin/sh
 
 #exec 3<&1
 #exec 1<&-
 #exec 1> /dev/null
 
-function show_help
+show_help ()
 {
     cat 1>&2 << "EOF"
 Useage:
@@ -22,7 +22,8 @@ ACTION
   -b  name
      Show a person's overall balance. Positive means s/he is owed money.
   -s  lender [debtor1 ... debtorN]
-     Search oweages, all terms must match.
+     Search oweages, all terms must match and can be sed-acceptable
+     regular expressions.
   -r  regex
      Search oweages by matching a regular expression to the reason field.
 EOF
@@ -31,6 +32,15 @@ EOF
 
 verbose_level=1
 db="${HOME}/.oweage_db"
+
+
+puts ()
+{
+    echo "$*"
+#    cat <<EOF
+#$*
+#EOF
+}
 
 trace ()
 {
@@ -49,23 +59,21 @@ trace ()
     then
         if [ $plusp -eq 1 ]
         then
-            echo "$*"
+            puts "$*"
         else
-            echo "$*" >&2
+            puts "$*" >&2
         fi
     fi
 }
 
 unformat_amt ()
 {
-    local amt x y
+    local x y
     trace -4 "unformat_amt ($1)"
 
-    amt=(`echo "$1" | sed -e 's/^\$\?\([0-9]*\)\.\?\([0-9]*\)$/\1 \2/'`)
-    x=${amt[0]}
-    y=${amt[1]}
-
-    trace -4 "$x $y"
+    set -- $(puts "$1" | sed -e 's/^\$\?\([0-9]*\)\.\?\([0-9]*\)$/\1 \2/')
+    x=$1
+    y=$2
 
     # Sanity checking
     if [ "${#y}" -gt 2 ]
@@ -80,7 +88,7 @@ unformat_amt ()
         y="${y}0"
     done
 
-    echo "$x$y"
+    puts "$x$y"
 }
 
 format_amt ()
@@ -98,39 +106,46 @@ format_amt ()
 
 read_oweage ()
 {
-    local token
-    if ! read -a token
-    then
-        return 1
-    fi
-    lender=${token[0]}
-    amt=${token[1]}
-    debtors=(${token[@]:2})
-    read
-    reason="$REPLY"
+    local tmp
+    read -r tmp
+    puts $tmp
+    read -r tmp
+}
+
+# Read the oweage with the reason intact
+read_full_oweage ()
+{
+    local tmp
+    read -r tmp || return 1
+    puts "$tmp"
+    read -r tmp || return 1
+    puts "$tmp"
 }
 
 show_oweage ()
 {
-    trace 1 "$lender `format_amt $amt` ${debtors[@]}"
+    local reason lender amt
+    reason=$1
+    lender=$2
+    amt=$(format_amt $3)
+    shift 3
+    trace 1 "$lender $amt $*"
     trace 1 "Reason: $reason"
-}
-
-match_lender ()
-{
-    test "$lender" = "$name"
 }
 
 match_cdr ()
 {
-    local str
-    for str in "${@:2}"
+    local x y
+    x=$1
+    shift
+    for y in "$@"
     do
-        test "$str" = "$1" && return 0
+        test "$x" = "$y" && return 0
     done
     return 1
 }
 
+cat >/dev/null <<"EOF"
 match_array ()
 {
     local x y matchp
@@ -151,14 +166,16 @@ match_array ()
     done
     return 0
 }
+EOF
 
 add_oweage ()
 {
     local db lender amt debtors reason
-    db="$1"
-    lender="$2"
-    amt=`unformat_amt $3` || return 1
-    debtors=("${@:4}")
+    db=$1
+    lender=$2
+    amt=$(unformat_amt "$3") || return 1
+    shift 3
+    debtors=$*
 
     trace -4 "db: $db"
     trace -4 "lender: $lender"
@@ -168,8 +185,8 @@ add_oweage ()
     trace 1 "Reason?"
     read reason
 
-    echo "$lender $amt ${debtors[@]}" >> "$db"
-    echo "$reason" >> "$db"
+    puts "$lender" "$amt" "$debtors" >> "$db"
+    puts "$reason" >> "$db"
 }
 
 show_balance ()
@@ -178,75 +195,92 @@ show_balance ()
 
     indiv_increm ()
     {
-        local lender debtors amt amt_each reason name
-        while read_oweage
+        local pers lender amt amt_each debtor
+        pers=$1
+        while set -- $(read_oweage) ; test -n "$*"
         do
-            amt=$(($amt - ($amt % ${#debtors[@]})))
-            amt_each=$((- $amt / ${#debtors[@]}))
-            if [ "$1" = "$lender" ]
+            lender=$1 ; amt=$2 ; shift 2
+            amt=$(($amt - ($amt % $#)))
+            amt_each=$((- $amt / $#))
+            if [ "$pers" = "$lender" ]
             then
-                echo "$1 $amt"
-                for name in "${debtors[@]}"
+                puts "$pers" "$amt"
+                for debtor in "$@"
                 do
-                    echo "$name $amt_each"
+                    puts "$debtor" "$amt_each"
                 done
-            elif match_cdr "$1" "${debtors[@]}"
+            elif match_cdr "$pers" "$@"
             then
-                echo "$lender $((- $amt_each))"
-                echo "$1 $amt_each"
+                puts "$lender" "$((- $amt_each))"
+                puts "$pers"        "$amt_each"
             fi
         done
+
+        #trace -6 "indiv_increm:"
+        #times >&2
     }
 
     reducer ()
     {
         local cur_name total name amt
-        read cur_name total || return 1
-        while read name amt
+        read -r cur_name total || return 1
+        while read -r name amt
         do
             if [ "$name" = "$cur_name" ]
             then
                 total=$(($total + $amt))
             else
-                echo "$cur_name $total"
+                puts "$cur_name" "$total"
                 cur_name="$name"
                 total="$amt"
             fi
         done 
-        echo "$cur_name $total"
+        puts "$cur_name" "$total"
+
+        #trace -6 "reducer:"
+        #times >&2
     }
 
     orderer ()
     {
         local name amt
 
-        while read name amt
+        while read -r name amt
         do
             if [ "$name" = "$1" ]
             then
-                echo "$name"  "$amt" >&3
+                puts "$name"      "$amt"   >&3
             else
-                echo "$name" "$((- $amt))"
+                puts "$name" "$((- $amt))"
             fi
         done | sort >&3
             
         # yes hi | { tee /dev/fd/3 | sed -e 's/hi/blar/' ; } 3>&1 | sed -e 's/hi/bye/'
+        #trace -6 "orderer:"
+        #times >&2
     } 3>&1
 
     formatter ()
     {
         local name amt
-        read name amt || return 1
+        read  -r name amt || return 1
         trace 1 "Balance for $name is $(format_amt $amt)"
         while read name amt
         do
-            trace 1 "$name $(format_amt $amt)"
+            trace 1 "$name" "$(format_amt $amt)"
         done
+
+        #trace -6 "formatter:"
+        #times >&2
     }
 
-    < "$db" indiv_increm "$1" | sort | reducer | orderer "$1" | formatter
+    indiv_increm "$1" | sort | reducer | orderer "$1" | formatter
+
+    #trace -6 "balancer:"
+    #times >&2
 }
 
+cat > /dev/null <<"EOF"
 search_oweages ()
 {
     local name marr sarr matchp lender amt debtors reason
@@ -267,6 +301,19 @@ search_oweages ()
             show_oweage
         fi
     done <$db
+}
+EOF
+
+opt_reason_regex ()
+{
+    local regex oweage reason
+    regex=$1
+    sed -n -e "{h;n;{/${regex}/{x;p;x;p}}}" | \
+    while read oweage
+    do
+        read reason
+        show_oweage "$reason" $oweage
+    done
 }
 
 if [ $# -eq 0 ]
@@ -304,25 +351,19 @@ do
         ;;
 
         '-b')
-        show_balance "$@"
+        show_balance "$@" < "$db"
         shift $#
         ;;
 
         '-s')
-        search_oweages "$@"
+        # unimplement to test
+        #search_oweages "$@"
         shift $#
         ;;
 
         '-r')
-        regex="$1"
+        opt_reason_regex "$1" < "$db"
         shift $#
-        while read_oweage
-        do
-            if expr "$reason" : "$regex" >/dev/null
-            then
-                show_oweage
-            fi
-        done <"$db"
         ;;
 
         *)
