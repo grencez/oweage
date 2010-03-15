@@ -7,40 +7,32 @@ Useage:
     oweage [OPTIONS] [ACTION]
 
 OPTIONS
-  -v  N
-     Set verbosity level to N, normal crap is level 1
-  --update-me
-     Overwrite this script with the lastest stable one
+  -v N                Set verbosity level to N, normal crap is level 1
+  --update-me         Overwrite this script with the lastest stable one
+  --version           Show version information
 
 CONFIG ACTIONS
-  --use   database
-    Specify the database to use
-    When unspecified, show the current database
-  --list
-    List the available databases
+  --use database     Specify the database to use
+                     When unspecified, show the current database
+  --list    List available databases
 
 REPOSITORY ACTIONS (in rough order of use)
-  --clone   http://path/to/git/repo dbname
+  --clone http://path/to/git/repo dbname
     Clone a repository having an 'oweage_database' file (which can be empty)
-  --pull
-    Call 'git pull' to update your local copy
-  --diff
-    Show the uncommitted changes you've made
-  --commit  message
-    Call 'git commit -a -C message' in the repository
-  --push
-    Call 'git push' to update the remote repository with your changes
+
+  --pull     Call 'git pull' to update your local copy
+  --diff         Show the uncommitted changes you've made
+  --commit message    Call 'git commit -a -C message' in the repository
+  --push     Call 'git push' to update the remote repository with your changes
 
 DATABASE ACTIONS
-  -a  lender dollars[.cents] debtor1 ... debtorN
-    Add new oweage.
-  -b  name
-    Show a person's overall balance. Positive means s/he is owed money.
-  -s  lender [debtor1 ... debtorN]
-    Search oweages, all terms must match and can be sed-acceptable regular
-    expressions.
-  -r  regex
-    Search oweages by matching a regular expression to the reason field.
+  -a lender dollars[.cents] debtor+      Add new oweage (+ means 1 or more)
+  -b name      Show a person's overall balance
+               Positive means s/he is owed money
+  -s lender [debtor]*      Search oweages, all terms must match and can be
+                           sed-acceptable regular expressions
+  -r  regex      Search oweages by matching a regular expression to the
+                 reason field.
 EOF
     return 1
 }
@@ -83,8 +75,9 @@ fi
 set_globals ()
 {
     local opts flag
-    opts=$(getopt -l 'update-me' \
-            -l 'use,clone,commit,push,pull,list' \
+    opts=$(getopt -l 'update-me,version' \
+            -l 'use,list' \
+            -l 'clone,pull,diff,commit,push' \
             -o 'v:d::absr' -- "$@") \
     || { show_usage ; return 1 ; }
     eval set -- $opts
@@ -418,6 +411,7 @@ config_action ()
     dir=$(dirname "$db")
     case "$action" in
         'update-me') wget -O "$0" "$update_url" ;;
+        'version') trace 1 "$version" ;;
         'clone') git clone "$1" "$progdir/db/$2" ;;
         'commit') cd "$dir" && git commit -a -C "$1" ;;
         'push') cd "$dir" && git push origin master ;;
