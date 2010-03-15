@@ -8,39 +8,85 @@ Useage:
 
 OPTIONS
   -v  N
-     Set verbosity level to N, normal crap is level 1.
-  -d  database
-     Specify the database to use. Default is $HOME/.oweage_db
+     Set verbosity level to N, normal crap is level 1
+  --update-me
+     Overwrite this script with the lastest stable one
 
-ACTION
+CONFIG ACTIONS
+  --use   database
+    Specify the database to use
+    When unspecified, show the current database
+  --list
+    List the available databases
+
+REPOSITORY ACTIONS (in rough order of use)
+  --clone   http://path/to/git/repo dbname
+    Clone a repository having an 'oweage_database' file (which can be empty)
+  --pull
+    Call 'git pull' to update your local copy
+  --diff
+    Show the uncommitted changes you've made
+  --commit  message
+    Call 'git commit -a -C message' in the repository
+  --push
+    Call 'git push' to update the remote repository with your changes
+
+DATABASE ACTIONS
   -a  lender dollars[.cents] debtor1 ... debtorN
-     Add new oweage.
+    Add new oweage.
   -b  name
-     Show a person's overall balance. Positive means s/he is owed money.
+    Show a person's overall balance. Positive means s/he is owed money.
   -s  lender [debtor1 ... debtorN]
-     Search oweages, all terms must match and can be sed-acceptable
-     regular expressions.
+    Search oweages, all terms must match and can be sed-acceptable regular
+    expressions.
   -r  regex
-     Search oweages by matching a regular expression to the reason field.
+    Search oweages by matching a regular expression to the reason field.
 EOF
     return 1
 }
 
 ###### BEGIN GLOBAL VARIABLES ######
 
+version='2010.3.15'
+update_url='http://grencez.codelove.org/code/oweage.sh'
+
 action=''
 verbose_level=1
-db="${HOME}/.oweage_db"
+db=''
 args=''
+
+progdir="$HOME/.oweage"
+
+mkdir -p "$progdir/db" || \
+{
+    trace -1 "Creation of $progdir/db failed!"
+    exit 1
+}
+
+update_cur ()
+{
+cat > "$progdir/cur" <<EOF
+db=$db
+verbose_level=$verbose_level
+EOF
+}
+
+if [ ! -f "$progdir/cur" ]
+then
+    update_cur
+fi
+
+. "$progdir/cur"
 
 ###### END GLOBAL VARIABLES ######
 
 set_globals ()
 {
     local opts flag
-    opts=$(getopt -o 'v:d:abs' -- "$@") \
-    || return 1
-
+    opts=$(getopt -l 'update-me' \
+            -l 'use,clone,commit,push,pull,list' \
+            -o 'v:d::absr' -- "$@") \
+    || { show_usage ; return 1 ; }
     eval set -- $opts
 
     while true
@@ -49,19 +95,22 @@ set_globals ()
         shift
         case "$flag" in
             '-v') verbose_level="$1" ; shift ;;
-            '-d') db="$1" ; shift ;;
+            '--use') action='select database' ;;
             '-a') action='add' ;;
             '-b') action='balance' ;;
             '-s') action='search' ;;
             '-r') action='regex search' ;;
             '--') break ;;
             ''  ) echo 'Why is there an empty arg?' >&2 ; return 1 ;;
+
+            *) action=$(echo "$flag" | sed -e 's/^--//') ;;
         esac
     done
     args=$(getopt -o '' -- "$@")
 
     if [ -z "$action" ]
     then
+        show_usage
         echo 'Please specify an action to take!' >&2
         return 1
     fi
@@ -73,9 +122,7 @@ set_globals ()
 puts ()
 {
     echo "$*"
-#    cat <<EOF
-#$*
-#EOF
+#printf '%s\n' "$*"
 }
 
 trace ()
@@ -104,8 +151,7 @@ trace ()
 
 lower_case ()
 {
-    printf '%s' "$1"
-    #printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
 unformat_amt ()
@@ -334,7 +380,9 @@ opt_reason_regex ()
 {
     local regex oweage reason
     regex=$1
-    sed -n -e "{h;n;{/${regex}/{x;p;x;p}}}" | \
+    cat "$db" \
+    | sed -ne "{h;n;{/${regex}/{x;p;x;p}}}" \
+    | \
     while read oweage
     do
         read reason
@@ -342,24 +390,73 @@ opt_reason_regex ()
     done
 }
 
-set_globals "$@" || { show_usage ; exit 1 ; }
+opt_select_database ()
+{
+    if [ -z "$*" ]
+    then
+        trace 1 "Current database is: $db"
+        return 0
+    fi
+
+    db="$*"
+    if [ -f "$db" ]
+    then
+        db=$(readlink -f "$db")
+    elif [ -f "$progdir/db/$db/oweage_database" ]
+    then
+        db="$progdir/db/$db/oweage_database"
+    else
+        trace -1 "Could not find appropriate database: $db"
+        return 1
+    fi
+    update_cur
+}
+
+config_action ()
+{
+    local dir
+    dir=$(dirname "$db")
+    case "$action" in
+        'update-me') wget -O "$0" "$update_url" ;;
+        'clone') git clone "$1" "$progdir/db/$2" ;;
+        'commit') cd "$dir" && git commit -a -C "$1" ;;
+        'push') cd "$dir" && git push origin master ;;
+        'pull') cd "$dir" && git pull origin master ;;
+        'list') cd "$progdir/db" && ls ;;
+        'select database') opt_select_database "$@" ;;
+        *) return 0 ;;
+    esac
+    action=''
+}
+
+db_action ()
+{
+    # Make sure database exists.
+    if [ ! -e "$db" ]
+    then
+        trace -1 "No database selected!"
+        exit 1
+    fi
+
+    case "$action" in
+        'add') add_oweage "$db" "$@" ;;
+        'balance') show_balance "$@" < "$db" ;;
+        'search') search_oweages "$@" ;;
+        'regex search') opt_reason_regex "$1" ;;
+    esac
+}
+
+set_globals "$@" || exit 1
 eval set -- $args
 shift
 trace 3 "args are now $@"
 trace 2 "Using $db as database."
 trace 2 "Action: $action"
 
-# Make sure database exists.
-if [ ! -e "$db" ]
-then
-    trace 2 "Creating database."
-    touch "$db"
-fi
 
-case "$action" in
-    'add') add_oweage "$db" "$@" ;;
-    'balance') show_balance "$@" < "$db" ;;
-    'search') search_oweages "$@" ;;
-    'regex search') opt_reason_regex "$1" < "$db" ;;
-esac
+config_action "$@" && \
+if [ -n "$action" ]
+then
+    db_action "$@"
+fi
 
