@@ -1,10 +1,6 @@
 #!/bin/sh
 
-#exec 3<&1
-#exec 1<&-
-#exec 1> /dev/null
-
-show_help ()
+show_usage ()
 {
     cat 1>&2 << "EOF"
 Useage:
@@ -30,8 +26,48 @@ EOF
     return 1
 }
 
+###### BEGIN GLOBAL VARIABLES ######
+
+action=''
 verbose_level=1
 db="${HOME}/.oweage_db"
+args=''
+
+###### END GLOBAL VARIABLES ######
+
+set_globals ()
+{
+    local opts flag
+    opts=$(getopt -o 'v:d:abs' -- "$@") \
+    || return 1
+
+    eval set -- $opts
+
+    while true
+    do
+        flag="$1"
+        shift
+        case "$flag" in
+            '-v') verbose_level="$1" ; shift ;;
+            '-d') db="$1" ; shift ;;
+            '-a') action='add' ;;
+            '-b') action='balance' ;;
+            '-s') action='search' ;;
+            '-r') action='regex search' ;;
+            '--') break ;;
+            ''  ) echo 'Why is there an empty arg?' >&2 ; return 1 ;;
+        esac
+    done
+    args=$(getopt -o '' -- "$@")
+
+    if [ -z "$action" ]
+    then
+        echo 'Please specify an action to take!' >&2
+        return 1
+    fi
+
+    return 0
+}
 
 
 puts ()
@@ -66,6 +102,12 @@ trace ()
     fi
 }
 
+lower_case ()
+{
+    printf '%s' "$1"
+    #printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
 unformat_amt ()
 {
     local x y
@@ -93,15 +135,7 @@ unformat_amt ()
 
 format_amt ()
 {
-    local x y
-    x=$(($1 / 100))
-    if [ $1 -ge 0 ] ; then
-        y=$(($1 % 100))
-    else
-        y=$((- $1 % 100))
-    fi
-
-    printf '$%d.%02d\n' $x $y
+    puts "$1" | sed -e 's/^\(.*\)\(..\)$/$\1.\2/'
 }
 
 read_oweage ()
@@ -133,6 +167,16 @@ show_oweage ()
     trace 1 "Reason: $reason"
 }
 
+show_oweages ()
+{
+    local reason lender amt debtors
+    while read -r lender amt debtors
+    do
+        read -r reason
+        show_oweage "$reason" "$lender" "$amt" "$debtors"
+    done
+}
+
 match_cdr ()
 {
     local x y
@@ -145,37 +189,14 @@ match_cdr ()
     return 1
 }
 
-cat >/dev/null <<"EOF"
-match_array ()
-{
-    local x y matchp
-    # sarr - array searching
-    # marr - array to match
-    for x in ${marr[@]}
-    do
-        matchp=0
-        for y in ${sarr[@]}
-        do
-            if [ "$x" = "$y" ]
-            then
-                matchp=1
-            fi
-        done
-
-        test $matchp -eq 0 && return 1
-    done
-    return 0
-}
-EOF
-
 add_oweage ()
 {
     local db lender amt debtors reason
     db=$1
-    lender=$2
+    lender=$(lower_case "$2")
     amt=$(unformat_amt "$3") || return 1
     shift 3
-    debtors=$*
+    debtors=$(lower_case "$*")
 
     trace -4 "db: $db"
     trace -4 "lender: $lender"
@@ -196,7 +217,7 @@ show_balance ()
     indiv_increm ()
     {
         local pers lender amt amt_each debtor
-        pers=$1
+        pers=$(lower_case "$1")
         while set -- $(read_oweage) ; test -n "$*"
         do
             lender=$1 ; amt=$2 ; shift 2
@@ -267,7 +288,10 @@ show_balance ()
         trace 1 "Balance for $name is $(format_amt $amt)"
         while read name amt
         do
-            trace 1 "$name" "$(format_amt $amt)"
+            if [ "$amt" != 0 ]
+            then
+                trace 1 "$name" "$(format_amt $amt)"
+            fi
         done
 
         #trace -6 "formatter:"
@@ -280,29 +304,31 @@ show_balance ()
     #times >&2
 }
 
-cat > /dev/null <<"EOF"
 search_oweages ()
 {
-    local name marr sarr matchp lender amt debtors reason
-    name="$1"
-    marr=${@:2}
-    while read_oweage
-    do
-        matchp=0
-        if [ "$lender" = "$name" ]
-        then
-            sarr=${debtors[@]}
-            match_array
-            matchp=$?
-        fi
+    local lender
+    lender=$(lower_case "$1")
+    shift
+    
+    {
+        printf '/^%s/b label0\n' "$lender"
+        puts 'b next'
+        puts ': label0'
 
-        if [ $matchp -eq 1 ]
-        then
-            show_oweage
-        fi
-    done <$db
+        i=1
+        for debtor in "$@"
+        do
+            debtor=$(lower_case "$debtor")
+            printf '/%s/b label%d\n' "$debtor" $i
+            puts 'b next'
+            printf ': label%d\n' $i
+            i=$(($i + 1))
+        done
+        puts 'p;n;p;b;: next;n'
+    } \
+    | sed -nf /dev/fd/0 "$db" \
+    | show_oweages
 }
-EOF
 
 opt_reason_regex ()
 {
@@ -316,63 +342,24 @@ opt_reason_regex ()
     done
 }
 
-if [ $# -eq 0 ]
+set_globals "$@" || { show_usage ; exit 1 ; }
+eval set -- $args
+shift
+trace 3 "args are now $@"
+trace 2 "Using $db as database."
+trace 2 "Action: $action"
+
+# Make sure database exists.
+if [ ! -e "$db" ]
 then
-    show_help
-    exit 1
+    trace 2 "Creating database."
+    touch "$db"
 fi
 
-while [ $# -gt 0 ]
-do
-    flag=$1
-    shift
-    case "$flag" in
-        '-v')
-        verbose_level="$1"
-        shift
-        ;;
-
-        '-d')
-        db="$1"
-        shift
-        trace 2 "Using $db as database."
-
-        # Make sure database exists.
-        if [ ! -e "$db" ]
-        then
-            trace 2 "Creating database."
-            touch "$db"
-        fi
-        ;;
-
-        '-a')
-        add_oweage "$db" "$@"
-        shift $#
-        ;;
-
-        '-b')
-        show_balance "$@" < "$db"
-        shift $#
-        ;;
-
-        '-s')
-        # unimplement to test
-        #search_oweages "$@"
-        shift $#
-        ;;
-
-        '-r')
-        opt_reason_regex "$1" < "$db"
-        shift $#
-        ;;
-
-        *)
-        show_help
-        false
-        ;;
-    esac
-
-    # Break if there was a problem
-    test 0 -ne "$?" && break
-done
+case "$action" in
+    'add') add_oweage "$db" "$@" ;;
+    'balance') show_balance "$@" < "$db" ;;
+    'search') search_oweages "$@" ;;
+    'regex search') opt_reason_regex "$1" < "$db" ;;
+esac
 
