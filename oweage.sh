@@ -39,7 +39,7 @@ EOF
 
 ###### BEGIN GLOBAL VARIABLES ######
 
-version='2010.3.15'
+version='2010.3.17'
 update_url='http://grencez.codelove.org/code/oweage.sh'
 
 action=''
@@ -413,9 +413,10 @@ config_action ()
         'update-me') wget -O "$0" "$update_url" ;;
         'version') trace 1 "$version" ;;
         'clone') git clone "$1" "$progdir/db/$2" ;;
-        'commit') cd "$dir" && git commit -a -C "$1" ;;
+        'commit') cd "$dir" && git commit -a -m "$1" ;;
         'push') cd "$dir" && git push origin master ;;
         'pull') cd "$dir" && git pull origin master ;;
+        'diff') cd "$dir" && git diff ;;
         'list') cd "$progdir/db" && ls ;;
         'select database') opt_select_database "$@" ;;
         *) return 0 ;;
