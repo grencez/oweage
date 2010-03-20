@@ -40,7 +40,7 @@ EOF
 
 ###### BEGIN GLOBAL VARIABLES ######
 
-version='2010.3.17'
+version='2010.3.20'
 update_url='http://grencez.codelove.org/code/oweage.sh'
 
 action=''
