@@ -21,6 +21,7 @@ REPOSITORY ACTIONS (in rough order of use)
     Clone a repository having an 'oweage_database' file (which can be empty)
 
   --pull     Call 'git pull' to update your local copy
+  --log        Call 'git log' to see recent changes
   --diff         Show the uncommitted changes you've made
   --commit message    Call 'git commit -a -C message' in the repository
   --push     Call 'git push' to update the remote repository with your changes
@@ -77,7 +78,7 @@ set_globals ()
     local opts flag
     opts=$(getopt -l 'update-me,version' \
             -l 'use,list' \
-            -l 'clone,pull,diff,commit,push' \
+            -l 'clone,pull,log,diff,commit,push' \
             -o 'v:d::absr' -- "$@") \
     || { show_usage ; return 1 ; }
     eval set -- $opts
@@ -416,6 +417,7 @@ config_action ()
         'commit') cd "$dir" && git commit -a -m "$1" ;;
         'push') cd "$dir" && git push origin master ;;
         'pull') cd "$dir" && git pull origin master ;;
+        'log' ) cd "$dir" && git log ;;
         'diff') cd "$dir" && git diff ;;
         'list') cd "$progdir/db" && ls ;;
         'select database') opt_select_database "$@" ;;
