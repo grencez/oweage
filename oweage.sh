@@ -4,43 +4,59 @@ show_usage ()
 {
     cat 1>&2 << "EOF"
 Useage:
-    oweage [OPTIONS] [ACTION]
+    oweage <option>* <action>
 
-OPTIONS
-  -v N                Set verbosity level to N, normal crap is level 1
-  --update-me         Overwrite this script with the lastest stable one
-  --version           Show version information
+Options
+  -v <level>
+    Set verbosity level, normal crap is level 1.
 
-CONFIG ACTIONS
-  --use database     Specify the database to use
-                     When unspecified, show the current database
-  --list    List available databases
+Cool actions
+  --update-me
+     Overwrite this script with the lastest stable one.
+  --version
+     Show version information.
 
-REPOSITORY ACTIONS (in rough order of use)
-  --clone http://path/to/git/repo dbname
-    Clone a repository having an 'oweage_database' file (which can be empty)
+Repository Actions (in rough order of use)
+  --clone <git repository> <database>
+     Clone a repository having an 'oweage_database' file (which can be empty).
+     This creates a new database on your end, under the name you provided.
+     To actually use it, see the --use flag.
+  --list
+     List available databases.
+  --use <database>?
+     Specify the database to use. When unspecified, show the current database.
+  --pull
+     Call 'git pull' to update your local copy.
+  --log
+     Call 'git log' to see recent changes.
+  --diff
+     Show the uncommitted changes you've made.
+  --commit <message>
+     Call 'git commit -a -C <message>' in the repository.
+  --push
+     Call 'git push' to update the remote repository with your changes.
 
-  --pull     Call 'git pull' to update your local copy
-  --log        Call 'git log' to see recent changes
-  --diff         Show the uncommitted changes you've made
-  --commit message    Call 'git commit -a -C message' in the repository
-  --push     Call 'git push' to update the remote repository with your changes
-
-DATABASE ACTIONS
-  -a lender dollars[.cents] debtor+      Add new oweage (+ means 1 or more)
-  -b name      Show a person's overall balance
-               Positive means s/he is owed money
-  -s lender [debtor]*      Search oweages, all terms must match and can be
-                           sed-acceptable regular expressions
-  -r  regex      Search oweages by matching a regular expression to the
-                 reason field.
+Database Actions (in rough order of importance)
+  -a <lender> <dollars>[.<cents>] <debtor>+
+    Add new oweage. You will be prompted for a reason the oweage is to exist.
+    Be aware that the lender should include herself in the debtor list if
+    appropriate! For example, if Persephone and Hades split their $600 rent
+    and Persephone pays this month, she would put:
+     $ oweage -a persephone 600 persephone hades
+  -b name
+    Show a person's overall balance. Positive means s/he is owed money.
+  -s <lender> <debtor>*
+    Search oweages, all terms must match and can be sed-acceptable regular
+    expressions.
+  -r regex
+    Search oweages by matching a regular expression to the reason field.
 EOF
     return 1
 }
 
 ###### BEGIN GLOBAL VARIABLES ######
 
-version='2010.3.20'
+version='2010.4.10'
 update_url='http://grencez.codelove.org/code/oweage.sh'
 
 action=''
@@ -76,10 +92,10 @@ fi
 set_globals ()
 {
     local opts flag
-    opts=$(getopt -l 'update-me,version' \
+    opts=$(getopt -l 'update-me,version,set-version' \
             -l 'use,list' \
             -l 'clone,pull,log,diff,commit,push' \
-            -o 'v:d::absr' -- "$@") \
+            -o 'v:absr' -- "$@") \
     || { show_usage ; return 1 ; }
     eval set -- $opts
 
@@ -406,6 +422,19 @@ opt_select_database ()
     update_cur
 }
 
+opt_set_version ()
+{
+    local newvers
+    newvers=$(date +%Y.%m.%d)
+    sed -ie "s/^version='$version'$/version='$newvers'/" "$0"
+    if [ 0 -eq $? ]
+    then
+        trace 1 "Version updated to $newvers"
+    else
+        trace 1 "Version update failed, is anything corrupted?"
+    fi
+}
+
 config_action ()
 {
     local dir
@@ -413,6 +442,7 @@ config_action ()
     case "$action" in
         'update-me') wget -O "$0" "$update_url" ;;
         'version') trace 1 "$version" ;;
+        'set-version') opt_set_version ;;
         'clone') git clone "$1" "$progdir/db/$2" ;;
         'commit') cd "$dir" && git commit -a -m "$1" ;;
         'push') cd "$dir" && git push origin master ;;
