@@ -56,7 +56,7 @@ EOF
 
 ###### BEGIN GLOBAL VARIABLES ######
 
-version='2010.4.10'
+version='2010.04.10'
 update_url='http://grencez.codelove.org/code/oweage.sh'
 
 action=''
@@ -94,7 +94,7 @@ set_globals ()
     local opts flag
     opts=$(getopt -l 'update-me,version,set-version' \
             -l 'use,list' \
-            -l 'clone,pull,log,diff,commit,push' \
+            -l 'clone,pull,log,diff,commit:,push' \
             -o 'v:absr' -- "$@") \
     || { show_usage ; return 1 ; }
     eval set -- $opts
@@ -106,6 +106,7 @@ set_globals ()
         case "$flag" in
             '-v') verbose_level="$1" ; shift ;;
             '--use') action='select database' ;;
+            '--commit') action='commit' ; break ;;
             '-a') action='add' ;;
             '-b') action='balance' ;;
             '-s') action='search' ;;
@@ -426,7 +427,7 @@ opt_set_version ()
 {
     local newvers
     newvers=$(date +%Y.%m.%d)
-    sed -ie "s/^version='$version'$/version='$newvers'/" "$0"
+    sed -i -e "s/^version='$version'$/version='$newvers'/" "$0"
     if [ 0 -eq $? ]
     then
         trace 1 "Version updated to $newvers"
