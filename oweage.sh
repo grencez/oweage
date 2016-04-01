@@ -312,7 +312,7 @@ show_balance ()
                 cur_name="$name"
                 total="$amt"
             fi
-        done 
+        done
         puts "$cur_name" "$total"
 
         #trace -6 "reducer:"
@@ -332,7 +332,7 @@ show_balance ()
                 puts "$name" "$((- $amt))"
             fi
         done | sort >&3
-            
+
         # yes hi | { tee /dev/fd/3 | sed -e 's/hi/blar/' ; } 3>&1 | sed -e 's/hi/bye/'
         #trace -6 "orderer:"
         #times >&2
@@ -366,7 +366,7 @@ search_oweages ()
     local lender
     lender=$(lower_case "$1")
     shift
-    
+
     {
         printf '/^%s/b label0\n' "$lender"
         puts 'b next'
