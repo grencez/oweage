@@ -56,8 +56,8 @@ EOF
 
 ###### BEGIN GLOBAL VARIABLES ######
 
-version='2010.04.10'
-update_url='http://grencez.codelove.org/code/oweage.sh'
+version='2016.04.01'
+update_url='https://raw.githubusercontent.com/grencez/oweage/master/oweage.sh'
 
 action=''
 verbose_level=1
