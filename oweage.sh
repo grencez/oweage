@@ -17,6 +17,10 @@ Cool actions
      Show version information.
 
 Repository Actions (in rough order of use)
+  -create <database>
+     Create a repository having an empty 'oweage_database' file.
+     It is not shared with anyone.
+     To actually use it, see the -use flag.
   -clone <git repository> <database>
      Clone a repository having an 'oweage_database' file (which can be empty).
      This creates a new database on your end, under the name you provided.
@@ -32,7 +36,7 @@ Repository Actions (in rough order of use)
   -diff
      Show the uncommitted changes you've made.
   -commit <message>
-     Call 'git commit -a -C <message>' in the repository.
+     Call 'git commit -a -m <message>' in the repository.
   -push
      Call 'git push' to update the remote repository with your changes.
 
@@ -43,6 +47,8 @@ Database Actions (in rough order of importance)
     appropriate! For example, if Persephone and Hades split their $600 rent
     and Persephone pays this month, she would put:
      $ oweage -a persephone 600 persephone hades
+  -acp <lender> <dollars>[.<cents>] <debtor>+
+    Add with commit and push.
   -b name
     Show a person's overall balance. Positive means s/he is owed money.
   -s <lender> <debtor>*
@@ -72,6 +78,12 @@ mkdir -p "$progdir/db" || \
     exit 1
 }
 
+mkdir -p "$progdir/localrepo" || \
+{
+  trace -1 "Creation of $progdir/localrepo failed!"
+  exit 1
+}
+
 update_cur ()
 {
 cat > "$progdir/cur" <<EOF
@@ -94,7 +106,7 @@ set_globals ()
     local opts flag
     opts=$(getopt -a -l 'update-me,version,set-version' \
             -l 'use,list' \
-            -l 'clone,pull,log,diff,commit:,push' \
+            -l 'acp,create,clone,pull,log,diff,commit:,push' \
             -o 'v:absr' -- "$@") \
     || { show_usage ; return 1 ; }
     eval set -- $opts
@@ -107,6 +119,7 @@ set_globals ()
             '-v') verbose_level="$1" ; shift ;;
             '--use') action='select database' ;;
             '--commit') action='commit' ; break ;;
+            '--acp') action='acp' ;;
             '-a') action='add' ;;
             '-b') action='balance' ;;
             '-s') action='search' ;;
@@ -248,23 +261,32 @@ match_cdr ()
 
 add_oweage ()
 {
-    local db lender amt debtors reason
-    db=$1
-    lender=$(lower_case "$2")
-    amt=$(unformat_amt "$3") || return 1
-    shift 3
-    debtors=$(lower_case "$*")
+  local db dir action lender amt debtors reason
+  db=$1
+  dir=$(dirname "$db")
+  action="$2"
+  shift 2
+  lender=$(lower_case "$1")
+  amt=$(unformat_amt "$2") || return 1
+  shift 2
+  debtors=$(lower_case "$*")
 
-    trace -4 "db: $db"
-    trace -4 "lender: $lender"
-    trace -4 "amt: $amt"
-    trace -4 "debtors: $debtors"
+  trace -4 "db: $db"
+  trace -4 "lender: $lender"
+  trace -4 "amt: $amt"
+  trace -4 "debtors: $debtors"
 
-    trace 1 "Reason?"
-    read reason
+  trace 1 "Reason?"
+  read reason
 
-    puts "$lender" "$amt" "$debtors" >> "$db"
-    puts "$reason" >> "$db"
+  puts "$lender" "$amt" "$debtors" >> "$db"
+  puts "$reason" >> "$db"
+
+  if [ 'acp' = "$action" ]
+  then
+    git commit -a -m "$reason"
+    git push origin master
+  fi
 }
 
 show_balance ()
@@ -436,6 +458,27 @@ opt_set_version ()
     fi
 }
 
+opt_create_repo ()
+{
+  local repo_name repo_path
+  repo_name="$1"
+  repo_path="localrepo/${repo_name}.git"
+  if ! mkdir "$progdir/$repo_path"
+  then
+    trace -1 "Could not create repo"
+    return 1
+  fi
+  cd "$progdir/$repo_path"
+  git init --bare
+  cd "$progdir/db"
+  git clone "../$repo_path" "$repo_name"
+  cd "$repo_name"
+  touch oweage_database
+  git add oweage_database
+  git commit -a -m "initialize empty database"
+  git push origin master
+}
+
 config_action ()
 {
     local dir
@@ -444,6 +487,7 @@ config_action ()
         'update-me') wget -O "$0" "$update_url" ;;
         'version') trace 1 "$version" ;;
         'set-version') opt_set_version ;;
+        'create') opt_create_repo "$1" ;;
         'clone') git clone "$1" "$progdir/db/$2" ;;
         'commit') cd "$dir" && git commit -a -m "$1" ;;
         'push') cd "$dir" && git push origin master ;;
@@ -467,7 +511,8 @@ db_action ()
     fi
 
     case "$action" in
-        'add') add_oweage "$db" "$@" ;;
+        'add') add_oweage "$db" 'a' "$@" ;;
+        'acp') add_oweage "$db" 'acp' "$@" ;;
         'balance') show_balance "$@" < "$db" ;;
         'search') search_oweages "$@" ;;
         'regex search') opt_reason_regex "$1" ;;
