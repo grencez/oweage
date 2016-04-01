@@ -11,50 +11,50 @@ Options
     Set verbosity level, normal crap is level 1.
 
 Cool actions
-  -update-me
+  update-me
      Overwrite this script with the lastest stable one.
-  -version
+  version
      Show version information.
 
 Repository Actions (in rough order of use)
-  -create <database>
+  create <database>
      Create a repository having an empty 'oweage_database' file.
      It is not shared with anyone.
-     To actually use it, see the -use flag.
-  -clone <git repository> <database>
+     To actually use it, see the 'use' flag.
+  clone <git repository> <database>
      Clone a repository having an 'oweage_database' file (which can be empty).
      This creates a new database on your end, under the name you provided.
-     To actually use it, see the -use flag.
-  -list
+     To actually use it, see the 'use' flag.
+  list
      List available databases.
-  -use <database>?
+  use <database>?
      Specify the database to use. When unspecified, show the current database.
-  -pull
+  pull
      Call 'git pull' to update your local copy.
-  -log
+  log
      Call 'git log' to see recent changes.
-  -diff
+  diff
      Show the uncommitted changes you've made.
-  -commit <message>
+  commit <message>
      Call 'git commit -a -m <message>' in the repository.
-  -push
+  push
      Call 'git push' to update the remote repository with your changes.
 
 Database Actions (in rough order of importance)
-  -a <lender> <dollars>[.<cents>] <debtor>+
+  a <lender> <dollars>[.<cents>] <debtor>+
     Add new oweage. You will be prompted for a reason the oweage is to exist.
     Be aware that the lender should include herself in the debtor list if
     appropriate! For example, if Persephone and Hades split their $600 rent
     and Persephone pays this month, she would put:
-     $ oweage -a persephone 600 persephone hades
-  -acp <lender> <dollars>[.<cents>] <debtor>+
+     $ oweage a persephone 600 persephone hades
+  A <lender> <dollars>[.<cents>] <debtor>+
     Add with commit and push.
-  -b name
+  b name
     Show a person's overall balance. Positive means s/he is owed money.
-  -s <lender> <debtor>*
+  s <lender> <debtor>*
     Search oweages, all terms must match and can be sed-acceptable regular
     expressions.
-  -r regex
+  r <regex>
     Search oweages by matching a regular expression to the reason field.
 EOF
     return 1
@@ -103,43 +103,45 @@ fi
 
 set_globals ()
 {
-    local opts flag
-    opts=$(getopt -a -l 'update-me,version,set-version' \
-            -l 'use,list' \
-            -l 'acp,create,clone,pull,log,diff,commit:,push' \
-            -o 'v:absr' -- "$@") \
-    || { show_usage ; return 1 ; }
-    eval set -- $opts
+  local flag
 
-    while true
-    do
-        flag="$1"
-        shift
-        case "$flag" in
-            '-v') verbose_level="$1" ; shift ;;
-            '--use') action='select database' ;;
-            '--commit') action='commit' ; break ;;
-            '--acp') action='acp' ;;
-            '-a') action='add' ;;
-            '-b') action='balance' ;;
-            '-s') action='search' ;;
-            '-r') action='regex search' ;;
-            '--') break ;;
-            ''  ) echo 'Why is there an empty arg?' >&2 ; return 1 ;;
+  while true
+  do
+    flag="$1"
+    shift
+    case "$flag" in
+      '-v') verbose_level="$1" ; shift ;;
+      *) break ;;
+    esac
+  done
 
-            *) action=$(echo "$flag" | sed -e 's/^--//') ;;
-        esac
-    done
-    args=$(getopt -o '' -- "$@")
+  case "$flag" in
+    'use') action='select database' ;;
+    'commit') action='commit' ; break ;;
+    'a' | 'add') action='add' ;;
+    'A' | 'Add') action='add_commit_push' ;;
+    'b' | 'bal' | 'balance') action='balance' ;;
+    's' | 'search') action='search' ;;
+    'r' | 'regex') action='regex search' ;;
 
-    if [ -z "$action" ]
-    then
-        show_usage
-        echo 'Please specify an action to take!' >&2
-        return 1
-    fi
+    'update-me' | 'version' | 'set-version' \
+    | 'create' | 'clone' | 'commit' | 'push' | 'pull' | 'log' | 'diff' \
+    | 'list')
+    action="$flag" ;;
 
-    return 0
+    *) printf 'Bad arg: %s\n' "$flag" >&2 ;;
+  esac
+
+  args=$(getopt -o '' -- "$@")
+
+  if [ -z "$action" ]
+  then
+    show_usage
+    echo 'Please specify an action to take!' >&2
+    return 1
+  fi
+
+  return 0
 }
 
 
@@ -282,10 +284,14 @@ add_oweage ()
   puts "$lender" "$amt" "$debtors" >> "$db"
   puts "$reason" >> "$db"
 
-  if [ 'acp' = "$action" ]
+  if [ 'A' = "$action" ]
   then
+    cd "$dir"
     git commit -a -m "$reason"
     git push origin master
+    echo 'Added. Committed. Pushed.' >&2
+  else
+    echo 'Added. Remember to commit and push.' >&2
   fi
 }
 
@@ -512,7 +518,7 @@ db_action ()
 
     case "$action" in
         'add') add_oweage "$db" 'a' "$@" ;;
-        'acp') add_oweage "$db" 'acp' "$@" ;;
+        'add_commit_push') add_oweage "$db" 'A' "$@" ;;
         'balance') show_balance "$@" < "$db" ;;
         'search') search_oweages "$@" ;;
         'regex search') opt_reason_regex "$1" ;;
