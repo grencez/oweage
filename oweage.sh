@@ -11,29 +11,29 @@ Options
     Set verbosity level, normal crap is level 1.
 
 Cool actions
-  --update-me
+  -update-me
      Overwrite this script with the lastest stable one.
-  --version
+  -version
      Show version information.
 
 Repository Actions (in rough order of use)
-  --clone <git repository> <database>
+  -clone <git repository> <database>
      Clone a repository having an 'oweage_database' file (which can be empty).
      This creates a new database on your end, under the name you provided.
-     To actually use it, see the --use flag.
-  --list
+     To actually use it, see the -use flag.
+  -list
      List available databases.
-  --use <database>?
+  -use <database>?
      Specify the database to use. When unspecified, show the current database.
-  --pull
+  -pull
      Call 'git pull' to update your local copy.
-  --log
+  -log
      Call 'git log' to see recent changes.
-  --diff
+  -diff
      Show the uncommitted changes you've made.
-  --commit <message>
+  -commit <message>
      Call 'git commit -a -C <message>' in the repository.
-  --push
+  -push
      Call 'git push' to update the remote repository with your changes.
 
 Database Actions (in rough order of importance)
@@ -92,7 +92,7 @@ fi
 set_globals ()
 {
     local opts flag
-    opts=$(getopt -l 'update-me,version,set-version' \
+    opts=$(getopt -a -l 'update-me,version,set-version' \
             -l 'use,list' \
             -l 'clone,pull,log,diff,commit:,push' \
             -o 'v:absr' -- "$@") \
